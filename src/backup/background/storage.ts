@@ -1,6 +1,7 @@
 import { FeatureStorage, CollectionDefinitions } from '../../search/storage'
 import { StorageManager } from '../../search/storage/manager'
 import { ObjectChangeBatch } from './backend/types'
+import { isExcludedFromBackup } from './utils'
 
 export default class BackupStorage extends FeatureStorage {
     collections: { [name: string]: CollectionDefinitions } = {
@@ -23,9 +24,40 @@ export default class BackupStorage extends FeatureStorage {
         ],
     }
 
+    recordingChanges: boolean = false
+
     constructor({ storageManager }: { storageManager: StorageManager }) {
         super(storageManager)
         this.registerCollections()
+
+        storageManager.on('changing', change => {
+            this._handleStorageChange(change)
+        })
+    }
+
+    _handleStorageChange({
+        collection,
+        pk,
+        operation,
+    }: {
+        collection: string
+        pk: string
+        operation: string
+    }) {
+        if (!this.recordingChanges) {
+            return
+        }
+
+        const collectionDefinition = this.storageManager.registry.collections[
+            collection
+        ]
+        if (!isExcludedFromBackup(collectionDefinition)) {
+            this.registerChange({
+                collection,
+                pk,
+                operation,
+            })
+        }
     }
 
     async registerChange({
@@ -50,6 +82,10 @@ export default class BackupStorage extends FeatureStorage {
             objectPk: pk,
             operation,
         })
+    }
+
+    startRecordingChanges() {
+        this.recordingChanges = true
     }
 
     async *streamChanges(
